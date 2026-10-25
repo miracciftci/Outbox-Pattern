@@ -1,4 +1,4 @@
-# Transactional Outbox Pattern — Spring Boot Sipariş Örneği
+# Outbox Pattern — Spring Boot Sipariş Örneği
 
 Bir e-ticaret sitesinde **sipariş oluşturulduğunda** `OrderCreated` event'inin Kafka'ya
 **güvenilir şekilde** yayınlanmasını gösteren demo proje.
@@ -131,9 +131,3 @@ Konsol loglarını da açık tutun; her adım (`Yayınlandı ... -> order-events
 - H2 yerine PostgreSQL/Oracle.
 - Yüksek hacimde Polling yerine **Debezium Outbox Event Router** (CDC). Outbox tablosu aynı kalır.
 - Event yazımı `ApplicationEventPublisher` + `@TransactionalEventListener(BEFORE_COMMIT)` ile soyutlanabilir.
-
-## Bilinen tuzak: Türkçe locale
-
-Kafka, Türkçe locale'de `"classic".toUpperCase()` → `"CLASSİC"` yaptığı için açılışta çöker.
-Bu yüzden `main()` içinde `Locale.setDefault(Locale.ENGLISH)` ve testler için surefire'da
-`-Duser.language=en` ayarlandı.
