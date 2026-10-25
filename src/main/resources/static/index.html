@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outbox Pattern Demo</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #fff; --text: #1d2330; --muted: #6b7385; --border: #e2e5ec;
+    --blue: #2f6fed; --green: #1f9d55; --amber: #c27c0e; --red: #d33a3a; --purple: #7a4fd6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 18px 24px; background: #151a26; color: #fff; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 20px; }
+  header span { color: #9aa3b8; }
+  main { padding: 20px 24px; display: grid; gap: 18px; }
+  .scenarios { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .card h3 { margin: 0 0 4px; font-size: 14px; }
+  .card p { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; }
+  .tag { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 99px; display: inline-block; margin-bottom: 6px; }
+  .tag.good { background: #e3f5ea; color: var(--green); }
+  .tag.bad { background: #fbe6e6; color: var(--red); }
+  .tag.ops { background: #ece6fb; color: var(--purple); }
+  button { font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 7px; border: 1px solid var(--border); background: #fff; cursor: pointer; margin: 2px 4px 2px 0; }
+  button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+  button.danger { background: var(--red); color: #fff; border-color: var(--red); }
+  button.on { background: var(--amber); color: #fff; border-color: var(--amber); }
+  button:hover { filter: brightness(0.95); }
+  .flow { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 1100px) { .flow { grid-template-columns: 1fr; } }
+  .col h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  .box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+  .box .title { padding: 9px 12px; font-weight: 600; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+  .box .title small { color: var(--muted); font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  td, th { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 11.5px; }
+  tr:last-child td { border-bottom: none; }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .empty { padding: 14px; color: var(--muted); text-align: center; font-size: 12.5px; }
+  .st { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 5px; }
+  .st.PENDING { background: #fff2d6; color: var(--amber); }
+  .st.PROCESSED { background: #e3f5ea; color: var(--green); }
+  .st.FAILED { background: #fbe6e6; color: var(--red); }
+  tr.ghost td { background: #fdeeee; }
+  tr.ghost .ghost-label { color: var(--red); font-weight: 700; }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .stat { flex: 1; min-width: 110px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 22px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .switches { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 14px; }
+  .pill { padding: 4px 10px; border-radius: 99px; background: #e3f5ea; color: var(--green); font-weight: 600; }
+  .pill.off { background: #fbe6e6; color: var(--red); }
+  .pill.warn { background: #fff2d6; color: var(--amber); }
+  #log { background: #151a26; color: #cfd6e6; border-radius: 10px; padding: 10px 14px; font: 12px/1.6 ui-monospace, Consolas, monospace; max-height: 180px; overflow: auto; }
+  #log .err { color: #ff8b8b; } #log .ok { color: #7ee2a8; }
+  a { color: var(--blue); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Transactional Outbox Pattern</h1>
+  <span>E-ticaret sipariş örneği · Sipariş Servisi → Outbox → Relay → Kafka → Fatura Servisi</span>
+  <span style="margin-left:auto"><a href="/h2-console" target="_blank" style="color:#9ec1ff">H2 Console</a> · JDBC URL: <code>jdbc:h2:mem:orderdb</code></span>
+</header>
+
+<main>
+  <section class="scenarios">
+    <div class="card">
+      <span class="tag good">OUTBOX</span>
+      <h3>1. Sipariş oluştur</h3>
+      <p>Sipariş + outbox kaydı tek transaction'da yazılır. Relay birkaç ms içinde Kafka'ya taşır, Fatura Servisi faturayı keser.</p>
+      <button class="primary" onclick="createOrder(false)">Sipariş oluştur</button>
+    </div>
+    <div class="card">
+      <span class="tag good">OUTBOX</span>
+      <h3>2. Commit öncesi hata</h3>
+      <p>Sipariş kaydedildikten sonra hata fırlar: sipariş de outbox kaydı da birlikte geri alınır. Kafka'ya hiçbir şey gitmez.</p>
+      <button onclick="createOrder(true)">Hatalı sipariş</button>
+    </div>
+    <div class="card">
+      <span class="tag bad">NAIVE / DUAL WRITE</span>
+      <h3>3. Hayalet event</h3>
+      <p>Event doğrudan Kafka'ya gönderilir, sonra DB rollback olur. Fatura Servisi var olmayan bir sipariş için fatura keser.</p>
+      <button class="danger" onclick="createNaive(true)">Naive + hata</button>
+      <button onclick="createNaive(false)">Naive (başarılı)</button>
+    </div>
+    <div class="card">
+      <span class="tag ops">RELAY</span>
+      <h3>4. Relay'i durdur</h3>
+      <p>Siparişler alınmaya devam eder; event'ler outbox'ta PENDING olarak birikir. Devam ettirince sırayla gönderilir.</p>
+      <button id="btnPause" onclick="toggle('relayPaused','/api/demo/relay/pause','/api/demo/relay/resume')">Relay'i durdur</button>
+    </div>
+    <div class="card">
+      <span class="tag ops">BROKER</span>
+      <h3>5. Kafka erişilemez</h3>
+      <p>Outbox ile sipariş yine alınır, relay retry yapar (5 denemeden sonra FAILED). Naive yöntemde ise sipariş alınamaz (503).</p>
+      <button id="btnBroker" onclick="toggle('brokerDown','/api/demo/broker/down','/api/demo/broker/up')">Broker'ı çökert</button>
+    </div>
+    <div class="card">
+      <span class="tag ops">AT-LEAST-ONCE</span>
+      <h3>6. Relay gönderip çöksün</h3>
+      <p>Kafka ack verir ama processed_at yazılmadan relay çöker → event tekrar gönderilir. Inbox duplicate'i yakalar, tek fatura kalır.</p>
+      <button id="btnCrash" onclick="armCrash()">Sonraki gönderimde çök</button>
+    </div>
+  </section>
+
+  <section class="flow">
+    <div class="col">
+      <h2>Sipariş Servisi</h2>
+      <div class="box">
+        <div class="title">orders <small id="ordersCount"></small></div>
+        <div id="orders"></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <h2>Outbox + Relay</h2>
+      <div class="switches" id="switches"></div>
+      <div class="stats">
+        <div class="stat"><b id="sPending">0</b><span>Bekleyen (PENDING)</span></div>
+        <div class="stat"><b id="sFailed">0</b><span>Başarısız (FAILED)</span></div>
+        <div class="stat"><b id="sAge">0 sn</b><span>En eski bekleyenin yaşı</span></div>
+      </div>
+      <div class="box">
+        <div class="title">outbox <small>son 50 kayıt</small></div>
+        <div id="outbox"></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <h2>Fatura Servisi (consumer)</h2>
+      <div class="box">
+        <div class="title">invoices <small id="invoicesCount"></small></div>
+        <div id="invoices"></div>
+      </div>
+      <div class="box">
+        <div class="title">inbox <small>işlenmiş eventId'ler</small></div>
+        <div id="inbox"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div id="log"></div>
+  </section>
+</main>
+
+<script>
+  const products = [["P-100", "Kulaklık", 1499.90], ["P-200", "Klavye", 899.00], ["P-300", "Mouse", 449.50], ["P-400", "Monitör", 7299.00]];
+  let state = {};
+
+  const short = id => id ? id.substring(0, 8) : "";
+  const time = iso => iso ? new Date(iso).toLocaleTimeString("tr-TR") : "";
+  const money = n => Number(n).toLocaleString("tr-TR", { minimumFractionDigits: 2 }) + " ₺";
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function log(msg, cls) {
+    const el = document.getElementById("log");
+    el.insertAdjacentHTML("afterbegin", `<div class="${cls || ""}">${new Date().toLocaleTimeString("tr-TR")}  ${esc(msg)}</div>`);
+  }
+
+  function randomOrder() {
+    const items = [...products].sort(() => Math.random() - .5).slice(0, 1 + Math.floor(Math.random() * 2))
+      .map(([productId, , unitPrice]) => ({ productId, quantity: 1 + Math.floor(Math.random() * 3), unitPrice }));
+    return { customerId: "C-" + (10000 + Math.floor(Math.random() * 90000)), items };
+  }
+
+  async function post(url, body) {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  async function createOrder(fail) {
+    const r = await post("/api/orders" + (fail ? "?simulateFailure=true" : ""), randomOrder());
+    r.ok ? log(`[OUTBOX] Sipariş ${short(r.data.id)} oluşturuldu (${money(r.data.totalAmount)}) → event outbox'ta`, "ok")
+         : log(`[OUTBOX] HTTP ${r.status}: ${r.data.error}`, "err");
+    refresh();
+  }
+
+  async function createNaive(fail) {
+    const r = await post("/api/orders/naive" + (fail ? "?failAfterPublish=true" : ""), randomOrder());
+    r.ok ? log(`[NAIVE] Sipariş ${short(r.data.id)} oluşturuldu, event doğrudan Kafka'ya gönderildi`, "ok")
+         : log(`[NAIVE] HTTP ${r.status}: ${r.data.error}`, "err");
+    refresh();
+  }
+
+  async function toggle(key, onUrl, offUrl) {
+    await post(state[key] ? offUrl : onUrl);
+    log(`${key} = ${!state[key]}`);
+    refresh();
+  }
+
+  async function armCrash() {
+    await post("/api/demo/relay/crash-next");
+    log("Relay bir sonraki gönderimden sonra çökecek. Şimdi bir sipariş oluşturun.");
+    refresh();
+  }
+
+  async function retry(id) {
+    await post(`/api/outbox/${id}/retry`);
+    log(`Outbox ${short(id)} yeniden kuyruğa alındı`);
+    refresh();
+  }
+
+  function table(headers, rows) {
+    if (!rows.length) return `<div class="empty">Kayıt yok</div>`;
+    return `<table><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr>${rows.join("")}</table>`;
+  }
+
+  async function refresh() {
+    try {
+      const [orders, outbox, stats, invoices, inbox, sw] = await Promise.all(
+        ["/api/orders", "/api/outbox", "/api/outbox/stats", "/api/invoices", "/api/inbox", "/api/demo/state"]
+          .map(u => fetch(u).then(r => r.json())));
+      state = sw;
+      const orderIds = new Set(orders.map(o => o.id));
+
+      document.getElementById("ordersCount").textContent = orders.length + " kayıt";
+      document.getElementById("orders").innerHTML = table(["orderId", "müşteri", "tutar", "saat"],
+        orders.map(o => `<tr><td class="mono">${short(o.id)}</td><td>${esc(o.customerId)}</td><td>${money(o.totalAmount)}</td><td>${time(o.createdAt)}</td></tr>`));
+
+      document.getElementById("outbox").innerHTML = table(["eventId", "type", "key (orderId)", "durum", "deneme", "oluşma / işlenme"],
+        outbox.map(e => `<tr title="${esc(e.lastError || "")}">
+          <td class="mono">${short(e.id)}</td><td>${esc(e.eventType)}</td><td class="mono">${short(e.aggregateId)}</td>
+          <td><span class="st ${e.status}">${e.status}</span>${e.status === "FAILED" ? ` <button onclick="retry('${e.id}')">retry</button>` : ""}</td>
+          <td>${e.retryCount}</td><td>${time(e.createdAt)}<br>${time(e.processedAt)}</td></tr>`));
+
+      document.getElementById("sPending").textContent = stats.pending;
+      document.getElementById("sFailed").textContent = stats.failed;
+      document.getElementById("sAge").textContent = stats.oldestPendingAgeSeconds + " sn";
+
+      document.getElementById("invoicesCount").textContent = invoices.length + " kayıt";
+      document.getElementById("invoices").innerHTML = table(["orderId", "tutar", "eventId", ""],
+        invoices.map(i => {
+          const ghost = !orderIds.has(i.orderId);
+          return `<tr class="${ghost ? "ghost" : ""}"><td class="mono">${short(i.orderId)}</td><td>${money(i.amount)}</td>
+            <td class="mono">${short(i.eventId)}</td><td class="ghost-label">${ghost ? "HAYALET: sipariş yok!" : ""}</td></tr>`;
+        }));
+
+      document.getElementById("inbox").innerHTML = table(["eventId", "type", "işlenme"],
+        inbox.map(m => `<tr><td class="mono">${short(m.eventId)}</td><td>${esc(m.eventType)}</td><td>${time(m.processedAt)}</td></tr>`));
+
+      document.getElementById("switches").innerHTML =
+        `<span class="pill ${sw.relayPaused ? "off" : ""}">Relay: ${sw.relayPaused ? "DURDU" : "çalışıyor"}</span>
+         <span class="pill ${sw.brokerDown ? "off" : ""}">Kafka: ${sw.brokerDown ? "ERİŞİLEMEZ" : "ayakta"}</span>
+         ${sw.crashAfterSendArmed ? `<span class="pill warn">Relay sonraki gönderimde çökecek</span>` : ""}`;
+      setBtn("btnPause", sw.relayPaused, "Relay'i devam ettir", "Relay'i durdur");
+      setBtn("btnBroker", sw.brokerDown, "Broker'ı düzelt", "Broker'ı çökert");
+      setBtn("btnCrash", sw.crashAfterSendArmed, "Kurulu, sipariş bekleniyor", "Sonraki gönderimde çök");
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function setBtn(id, on, onText, offText) {
+    const b = document.getElementById(id);
+    b.textContent = on ? onText : offText;
+    b.classList.toggle("on", on);
+  }
+
+  refresh();
+  setInterval(refresh, 1000);
+</script>
+</body>
+</html>

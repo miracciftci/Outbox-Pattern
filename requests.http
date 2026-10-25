@@ -1,0 +1,56 @@
+### 1) Outbox ile sipariş oluştur
+POST http://localhost:8080/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "C-55120",
+  "items": [
+    { "productId": "P-100", "quantity": 2, "unitPrice": 1499.90 },
+    { "productId": "P-200", "quantity": 1, "unitPrice": 899.00 }
+  ]
+}
+
+### 2) Outbox + commit öncesi hata -> sipariş ve outbox birlikte rollback
+POST http://localhost:8080/api/orders?simulateFailure=true
+Content-Type: application/json
+
+{ "customerId": "C-55121", "items": [ { "productId": "P-100", "quantity": 1, "unitPrice": 1499.90 } ] }
+
+### 3) NAIVE (dual write) + hata -> hayalet event
+POST http://localhost:8080/api/orders/naive?failAfterPublish=true
+Content-Type: application/json
+
+{ "customerId": "C-66666", "items": [ { "productId": "P-300", "quantity": 1, "unitPrice": 449.50 } ] }
+
+### Siparişler
+GET http://localhost:8080/api/orders
+
+### Outbox kayıtları
+GET http://localhost:8080/api/outbox
+
+### Outbox metrikleri (bekleyen, başarısız, en eski bekleyenin yaşı)
+GET http://localhost:8080/api/outbox/stats
+
+### Fatura servisi: faturalar ve inbox
+GET http://localhost:8080/api/invoices
+
+###
+GET http://localhost:8080/api/inbox
+
+### --- Demo anahtarları ---
+POST http://localhost:8080/api/demo/relay/pause
+
+###
+POST http://localhost:8080/api/demo/relay/resume
+
+###
+POST http://localhost:8080/api/demo/broker/down
+
+###
+POST http://localhost:8080/api/demo/broker/up
+
+### Relay, bir sonraki gönderimden sonra processed_at yazmadan çöksün (duplicate senaryosu)
+POST http://localhost:8080/api/demo/relay/crash-next
+
+### Actuator metriği
+GET http://localhost:8080/actuator/metrics/outbox.pending.count

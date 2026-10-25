@@ -1,0 +1,82 @@
+spring:
+  application:
+    name: order-outbox
+
+  # ---------- Veritabanı (H2, bellekte) ----------
+  datasource:
+    url: jdbc:h2:mem:orderdb;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+  sql:
+    init:
+      mode: always
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+  # ---------- Kafka ----------
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    # Producer (Outbox Relay): kaybolmasın, retry duplicate üretmesin, sıra korunsun
+    producer:
+      acks: all
+      retries: 2147483647
+      properties:
+        "[enable.idempotence]": true
+        "[max.in.flight.requests.per.connection]": 5
+        # Broker erişilemezse relay uzun süre bloklanmasın
+        "[max.block.ms]": 5000
+        "[request.timeout.ms]": 5000
+        "[delivery.timeout.ms]": 10000
+
+    # Consumer (Fatura Servisi): offset, DB işlemi commit edildikten sonra ilerlesin
+    consumer:
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      isolation-level: read_committed
+    listener:
+      ack-mode: record
+
+server:
+  port: 8080
+
+# true: uygulama kendi içinde gömülü bir Kafka broker başlatır (kurulum gerekmez, rastgele port)
+# false: docker-compose ile ayağa kaldırılan gerçek Kafka kullanılır (bkz. application-docker.yml)
+demo:
+  embedded-kafka:
+    enabled: true
+
+# ---------- Outbox ----------
+outbox:
+  topic: order-events
+  relay:
+    fixed-delay: 1000
+    batch-size: 100
+    max-retries: 5
+  cleanup:
+    # İşlenmiş kayıtlar bu süreden eskiyse silinir (demo için kısa tutuldu)
+    retention: PT10M
+    fixed-delay: 60000
+
+# ---------- İzleme ----------
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+
+# ---------- Log ----------
+logging:
+  level:
+    "[com.example.outbox]": INFO
+    "[org.apache.kafka]": WARN
+    kafka: WARN
+    "[state.change.logger]": WARN
+    "[org.springframework.kafka]": WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %highlight(%-5level) [%15.15thread] %cyan(%-28.28logger{0}) : %msg%n"
